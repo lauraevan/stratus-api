@@ -732,7 +732,7 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
 
   try {
     push({ status: "creating_account" });
-    const acc = await createAccount();
+    const acc = await require("./mail-providers").createAccount();
 
     releaseAccountSlot(apiKey);
 
