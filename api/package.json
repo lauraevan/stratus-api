@@ -2,7 +2,10 @@
   "name": "stratus",
   "version": "1.0.0",
   "scripts": {
-    "start": "node server.js",
+    "scripts": {
+  "start": "node api.js",
+  "dev": "node --watch api.js"
+}
     "dev": "node --watch server.js"
   },
   "dependencies": {
