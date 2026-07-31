@@ -1,7 +1,7 @@
 {
   "sites": {
     "main": {
-      "api_key": "sk_live_name_here",
+      "api_key": "embercloud-PLRS",
       "enabled": true,
       "max_concurrent_sessions": 9999999999999999,
       "max_session_seconds": 900,
