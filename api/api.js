@@ -1,4 +1,4 @@
-const express = require("express");
+8const express = require("express");
 const { randomUUID, createDecipheriv } = require("crypto");
 const { readFileSync } = require("fs");
 const { WebSocketServer, WebSocket } = require("ws");
@@ -634,7 +634,9 @@ app.get("/cloud/v1/embed", (req, res) => {
   if (!req.query.id) {
     return res.status(400).type("text").send("Missing `id` parameter");
   }
-  res.sendFile(path.join(__dirname, "public", "e.html"));
+res.sendFile(
+  path.join(__dirname, "public", "e-team-ember.html"),
+);
 });
 
 app.get("/cloud/v1/embed-data", (req, res) => {
