@@ -1,7 +1,7 @@
 {
   "sites": {
     "main": {
-      "api_key": "embercloud-PLRS",
+      "api_key": "embercloud-api-3940-1452-0918-1032",
       "enabled": true,
       "max_concurrent_sessions": 9999999999999999,
       "max_session_seconds": 900,
