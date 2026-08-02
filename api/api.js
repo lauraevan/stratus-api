@@ -1,4 +1,4 @@
-8const express = require("express");
+const express = require("express");
 const { randomUUID, createDecipheriv } = require("crypto");
 const { readFileSync } = require("fs");
 const { WebSocketServer, WebSocket } = require("ws");
