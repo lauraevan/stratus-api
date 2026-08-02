@@ -634,9 +634,7 @@ app.get("/cloud/v1/embed", (req, res) => {
   if (!req.query.id) {
     return res.status(400).type("text").send("Missing `id` parameter");
   }
-res.sendFile(
-  path.join(__dirname, "public", "e-team-ember.html"),
-);
+res.sendFile(path.join(__dirname, "public", "e.html"));
 });
 
 app.get("/cloud/v1/embed-data", (req, res) => {
