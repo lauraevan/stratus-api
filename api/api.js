@@ -6,7 +6,7 @@ const { createServer } = require("http");
 const dns = require("dns");
 const path = require("path");
 const chalk = require("chalk");
-const { claimEligibleRewards } = require("./raccoon-rewards.js");
+const { claimEligibleRewards, loadActions } = require("./raccoon-rewards.js");
 
 if (!globalThis.crypto) globalThis.crypto = require("crypto").webcrypto;
 
@@ -95,6 +95,40 @@ async function runAccountRewards(account) {
       ),
     );
     return null;
+  }
+}
+
+
+async function runSessionRewards(session) {
+  if (!session?.sn || !session?.token) {
+    throw new Error("Session account is not ready for rewards.");
+  }
+
+  if (session.reward_collection_running) {
+    return {
+      status: "running",
+      summary: session.reward_summary || null,
+    };
+  }
+
+  session.reward_collection_running = true;
+  session.reward_last_started_at = Date.now();
+
+  try {
+    const summary = await runAccountRewards({
+      sn: session.sn,
+      token: session.token,
+    });
+
+    session.reward_summary = summary;
+    session.reward_last_completed_at = Date.now();
+
+    return {
+      status: "complete",
+      summary,
+    };
+  } finally {
+    session.reward_collection_running = false;
   }
 }
 
@@ -859,6 +893,10 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
     raccoonPingInterval: null,
     clientWs: null,
     costInterval: null,
+    reward_summary: null,
+    reward_collection_running: false,
+    reward_last_started_at: null,
+    reward_last_completed_at: null,
   };
   sessions.set(uuid, session);
   logApi(
@@ -885,7 +923,13 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
     push({ status: "requesting_game" });
 
     const init = await doInitGame(session);
-    void runAccountRewards({ sn: session.sn, token: session.token });
+    void runSessionRewards(session).catch((error) => {
+      logSys(
+        chalk.yellow(
+          `rewards: background run failed — ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    });
 
     if (!sessions.has(uuid)) return res.end();
 
@@ -1054,6 +1098,74 @@ app.post("/cloud/v1/startGame", auth, (req, res) => {
   );
 
   connectRaccoonSignaling(session);
+});
+
+app.get("/cloud/v1/rewards/status", auth, (req, res) => {
+  const { uuid } = req.query;
+  if (!uuid) return res.status(400).json({ error: "Missing uuid." });
+
+  const session = sessions.get(uuid);
+  if (!session)
+    return res.status(404).json({ error: "Session not found or expired." });
+  if (session.api_key !== req.apiKey)
+    return res.status(403).json({ error: "Forbidden." });
+
+  let configured = [];
+  try {
+    configured = loadActions()
+      .map((action, index) => String(action?.name || `reward-${index + 1}`))
+      .filter(Boolean);
+  } catch {}
+
+  res.json({
+    uuid,
+    auto_collect: true,
+    account_ready: Boolean(session.sn && session.token),
+    running: Boolean(session.reward_collection_running),
+    configured_count: configured.length,
+    configured_rewards: configured,
+    last_started_at: session.reward_last_started_at,
+    last_completed_at: session.reward_last_completed_at,
+    last_summary: session.reward_summary,
+  });
+});
+
+app.post("/cloud/v1/rewards/claim", auth, async (req, res) => {
+  const { uuid } = req.body || {};
+  if (!uuid) return res.status(400).json({ error: "Missing uuid." });
+
+  const session = sessions.get(uuid);
+  if (!session)
+    return res.status(404).json({ error: "Session not found or expired." });
+  if (session.api_key !== req.apiKey)
+    return res.status(403).json({ error: "Forbidden." });
+  if (!session.sn || !session.token)
+    return res.status(409).json({
+      error: "Session account is still being prepared.",
+      status: "creating_account",
+    });
+
+  try {
+    const result = await runSessionRewards(session);
+
+    if (result.status === "running") {
+      return res.status(202).json({
+        uuid,
+        status: "running",
+        last_summary: result.summary,
+      });
+    }
+
+    return res.json({
+      uuid,
+      status: "complete",
+      summary: result.summary,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.post("/cloud/v1/pingSession", auth, (req, res) => {
