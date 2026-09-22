@@ -26,15 +26,18 @@ function safeJsonParse(value, fallback) {
 
 function loadActions() {
   const fromEnv = String(process.env.RACCOON_REWARD_ACTIONS || "").trim();
+
   if (fromEnv) {
     const parsed = safeJsonParse(fromEnv, null);
-    if (!Array.isArray(parsed))
+    if (!Array.isArray(parsed)) {
       throw new Error("RACCOON_REWARD_ACTIONS must be a JSON array");
+    }
     return parsed;
   }
 
+  const file = path.join(__dirname, "reward-actions.json");
+
   try {
-    const file = path.join(__dirname, "reward-actions.json");
     const parsed = JSON.parse(readFileSync(file, "utf8"));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -43,22 +46,28 @@ function loadActions() {
 }
 
 function normalizeAction(action, index) {
-  if (!action || typeof action !== "object")
+  if (!action || typeof action !== "object") {
     throw new Error(`reward action #${index + 1} must be an object`);
+  }
 
   const name = String(action.name || `reward-${index + 1}`).trim();
   const claim =
     action.claim && typeof action.claim === "object" ? action.claim : action;
+
   const claimPath = String(claim.path || "").trim();
 
-  if (!claimPath.startsWith("/") || claimPath.startsWith("//"))
+  if (!claimPath.startsWith("/") || claimPath.startsWith("//")) {
     throw new Error(`${name}: claim path must be a Raccoon-relative path`);
+  }
 
   let probe = null;
+
   if (action.probe && typeof action.probe === "object") {
     const probePath = String(action.probe.path || "").trim();
-    if (!probePath.startsWith("/") || probePath.startsWith("//"))
+
+    if (!probePath.startsWith("/") || probePath.startsWith("//")) {
       throw new Error(`${name}: probe path must be a Raccoon-relative path`);
+    }
 
     probe = {
       ...action.probe,
@@ -80,6 +89,7 @@ function normalizeAction(action, index) {
 
 function getPath(value, dottedPath) {
   if (!dottedPath) return value;
+
   return String(dottedPath)
     .split(".")
     .filter(Boolean)
@@ -94,11 +104,18 @@ function matchesCondition(payload, condition) {
 
   const value = getPath(payload, condition.path);
 
-  if (Object.prototype.hasOwnProperty.call(condition, "equals"))
+  if (Object.prototype.hasOwnProperty.call(condition, "equals")) {
     return value === condition.equals;
-  if (Object.prototype.hasOwnProperty.call(condition, "notEquals"))
+  }
+
+  if (Object.prototype.hasOwnProperty.call(condition, "notEquals")) {
     return value !== condition.notEquals;
-  if (Array.isArray(condition.in)) return condition.in.includes(value);
+  }
+
+  if (Array.isArray(condition.in)) {
+    return condition.in.includes(value);
+  }
+
   if (condition.truthy === true) return Boolean(value);
   if (condition.falsy === true) return !value;
 
@@ -112,12 +129,14 @@ function materializeBody(body, account) {
     user_token: account.token,
   };
 
+  const source = body && typeof body === "object" ? body : {};
+
   const replacements = {
     "$sn": account.sn,
     "$token": account.token,
   };
 
-  function replace(value) {
+  const replace = (value) => {
     if (
       typeof value === "string" &&
       Object.prototype.hasOwnProperty.call(replacements, value)
@@ -134,16 +153,17 @@ function materializeBody(body, account) {
     }
 
     return value;
-  }
+  };
 
   return {
     ...base,
-    ...replace(body && typeof body === "object" ? body : {}),
+    ...replace(source),
   };
 }
 
 async function readPayload(response) {
   const raw = await response.text();
+
   if (!raw) return null;
 
   try {
@@ -163,19 +183,28 @@ async function performStep(raccoonFetch, account, step) {
     "user-agent":
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/147.0.0.0 Safari/537.36",
     "x-requested-with": "XMLHttpRequest",
-    ...(step.headers && typeof step.headers === "object" ? step.headers : {}),
+    ...(step.headers && typeof step.headers === "object"
+      ? step.headers
+      : {}),
   };
 
   const method = String(step.method || "POST").toUpperCase();
-  const opts = { method, headers };
+
+  const opts = {
+    method,
+    headers,
+  };
 
   if (!["GET", "HEAD"].includes(method)) {
     const body = materializeBody(step.body, account);
+
     opts.body = new URLSearchParams(
       Object.entries(body).reduce((out, [key, value]) => {
         if (value === undefined || value === null) return out;
+
         out[key] =
           typeof value === "object" ? JSON.stringify(value) : String(value);
+
         return out;
       }, {}),
     );
@@ -191,13 +220,21 @@ async function performStep(raccoonFetch, account, step) {
   };
 }
 
-async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
-  if (!account?.sn || !account?.token)
+async function claimEligibleRewards(
+  account,
+  { raccoonFetch, log } = {},
+) {
+  if (!account?.sn || !account?.token) {
     throw new Error("reward collector requires account sn + token");
-  if (typeof raccoonFetch !== "function")
-    throw new Error("reward collector requires raccoonFetch");
+  }
 
-  if (!boolEnv("RACCOON_REWARDS_ENABLED", true)) {
+  if (typeof raccoonFetch !== "function") {
+    throw new Error("reward collector requires raccoonFetch");
+  }
+
+  const enabled = boolEnv("RACCOON_REWARDS_ENABLED", true);
+
+  if (!enabled) {
     return {
       enabled: false,
       configured: 0,
@@ -208,6 +245,7 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
   }
 
   const actions = loadActions().map(normalizeAction);
+
   const result = {
     enabled: true,
     configured: actions.length,
@@ -219,7 +257,11 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
   for (const action of actions) {
     try {
       if (action.probe) {
-        const probe = await performStep(raccoonFetch, account, action.probe);
+        const probe = await performStep(
+          raccoonFetch,
+          account,
+          action.probe,
+        );
 
         if (!probe.ok) {
           result.failed.push({
@@ -227,25 +269,39 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
             stage: "probe",
             statusCode: probe.statusCode,
           });
-          log?.(`rewards: ${action.name} probe HTTP ${probe.statusCode}`);
+
+          log?.(
+            `rewards: ${action.name} probe HTTP ${probe.statusCode}`,
+          );
+
           continue;
         }
 
-        const condition = action.probe.claimWhen || action.probe.when;
+        const condition =
+          action.probe.claimWhen || action.probe.when;
+
         if (!matchesCondition(probe.payload, condition)) {
           result.skipped.push({
             name: action.name,
             reason: "not_eligible",
           });
+
           log?.(`rewards: ${action.name} not eligible`);
           continue;
         }
       }
 
-      const claim = await performStep(raccoonFetch, account, action.claim);
+      const claim = await performStep(
+        raccoonFetch,
+        account,
+        action.claim,
+      );
+
       const successCondition =
         action.claim.successWhen || action.claim.when;
+
       const providerStatus = claim.payload?.status;
+
       const providerAccepted =
         providerStatus === undefined ||
         providerStatus === null ||
@@ -265,6 +321,7 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
           name: action.name,
           statusCode: claim.statusCode,
         });
+
         log?.(`rewards: ${action.name} claimed`);
       } else {
         result.skipped.push({
@@ -274,6 +331,7 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
             : "http_error",
           statusCode: claim.statusCode,
         });
+
         log?.(
           `rewards: ${action.name} skipped (HTTP ${claim.statusCode})`,
         );
@@ -282,11 +340,17 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
       result.failed.push({
         name: action.name,
         stage: "claim",
-        error: error instanceof Error ? error.message : String(error),
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error),
       });
+
       log?.(
         `rewards: ${action.name} failed — ${
-          error instanceof Error ? error.message : String(error)
+          error instanceof Error
+            ? error.message
+            : String(error)
         }`,
       );
     }

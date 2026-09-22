@@ -1,0 +1,23 @@
+[
+  {
+    "name": "daily-sign-in",
+    "probe": {
+      "path": "/REPLACE_WITH_REAL_STATUS_PATH",
+      "method": "POST",
+      "body": {},
+      "claimWhen": {
+        "path": "data.claimable",
+        "equals": true
+      }
+    },
+    "claim": {
+      "path": "/REPLACE_WITH_REAL_CLAIM_PATH",
+      "method": "POST",
+      "body": {},
+      "successWhen": {
+        "path": "status",
+        "in": [200, 201]
+      }
+    }
+  }
+]
