@@ -3,13 +3,13 @@
     "main": {
       "api_key": "stratus-api-synapsium",
       "enabled": true,
-      "max_concurrent_sessions": 9999999999999999,
-      "max_session_seconds": 900,
+      "max_concurrent_sessions": 10000000000000000,
+      "max_session_seconds": 1140,
       "limits": {
-    "per_minute": 99999999999,
+        "per_minute": 99999999999,
         "per_hour": 99999999,
         "per_day": 999999999999,
-        "per_month": 999999999999999999999
+        "per_month": 1e+21
       }
     }
   }
