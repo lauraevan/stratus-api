@@ -5,14 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/index.ts",
-    "start": "NODE_ENV=production bun src/index.ts",
-    "build": "bun run build.ts"
+    "start": "cd api && node api.js",
+    "build": "bun run build.ts",
+    "start:api": "cd api && node api.js",
+    "start:docs": "bun src/index.ts"
   },
   "dependencies": {
     "bun-plugin-tailwind": "^0.1.2",
     "react": "^19",
     "react-dom": "^19",
-    "tailwindcss": "^4.1.11"
+    "tailwindcss": "^4.1.11",
+    "altcha-lib": "^2.2.0",
+    "chalk": "^4.1.2",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/react": "^19",
