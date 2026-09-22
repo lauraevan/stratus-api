@@ -5,7 +5,8 @@ const { WebSocketServer, WebSocket } = require("ws");
 const { createServer } = require("http");
 const dns = require("dns");
 const path = require("path");
-const chalk = require("chalk");\nconst { claimEligibleRewards } = require("./raccoon-rewards.js");
+const chalk = require("chalk");
+const { claimEligibleRewards } = require("./raccoon-rewards.js");
 
 if (!globalThis.crypto) globalThis.crypto = require("crypto").webcrypto;
 
