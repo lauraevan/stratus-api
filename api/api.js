@@ -6,7 +6,6 @@ const { createServer } = require("http");
 const dns = require("dns");
 const path = require("path");
 const chalk = require("chalk");
-const { claimEligibleRewards } = require("./raccoon-rewards.js");
 
 if (!globalThis.crypto) globalThis.crypto = require("crypto").webcrypto;
 
@@ -66,35 +65,6 @@ async function raccoonFetch(pathAndQuery, opts = {}) {
   } catch {
     raccoonIpCache = null;
     return fetchWithTimeout(`https://${RACCOON_HOST}${pathAndQuery}`, opts);
-  }
-}
-
-async function collectAccountRewards(account) {
-  try {
-    const summary = await claimEligibleRewards(account, {
-      raccoonFetch,
-      log: (message) => logSys(chalk.gray(message)),
-    });
-
-    if (summary.configured > 0) {
-      logSys(
-        chalk.gray(
-          `rewards: configured=${summary.configured} claimed=${summary.claimed.length} skipped=${summary.skipped.length} failed=${summary.failed.length}`,
-        ),
-      );
-    }
-
-    return summary;
-  } catch (error) {
-    logSys(
-      chalk.yellow(
-        `rewards: collector error — ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      ),
-    );
-
-    return null;
   }
 }
 
@@ -189,13 +159,11 @@ async function createAccount() {
     const acc = pool.shift();
     logSys(chalk.gray(`pool: served account (${pool.length} remaining)`));
     fillPool().catch(() => {});
-    acc.reward_summary = await collectAccountRewards(acc);
     return acc;
   }
   logSys(chalk.gray("pool: miss — creating account on demand"));
   const acc = await require("./mail-providers 5.js").createAccount();
   fillPool().catch(() => {});
-  acc.reward_summary = await collectAccountRewards(acc);
   return acc;
 }
 
