@@ -235,8 +235,17 @@ async function claimEligibleRewards(account, { raccoonFetch, log } = {}) {
 
       const claim = await performStep(raccoonFetch, account, action.claim);
       const successCondition = action.claim.successWhen || action.claim.when;
+      const providerStatus = claim.payload?.status;
+      const providerAccepted =
+        providerStatus === undefined ||
+        providerStatus === null ||
+        providerStatus === 200 ||
+        providerStatus === 201 ||
+        providerStatus === "200" ||
+        providerStatus === "201";
       const success =
         claim.ok &&
+        providerAccepted &&
         (!successCondition || matchesCondition(claim.payload, successCondition));
 
       if (success) {
