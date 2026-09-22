@@ -267,8 +267,26 @@ async function doClaimGame(session, queue_id) {
       }),
     })
   ).json();
-  if (d.status === 200 && d.data?.result) return decryptPayload(d.data.result);
-  throw new Error(`Failed to claim game. API Status: ${d.status}`);
+
+  if ((d.status === 200 || d.status === 201) && d.data?.result) {
+    return decryptPayload(d.data.result);
+  }
+
+  if (d.status === 200 || d.status === 201) {
+    logApi(
+      session.api_key,
+      chalk.gray(
+        `claim pending for ${game_key} queue=${queue_id} status=${d.status}`,
+      ),
+    );
+    return null;
+  }
+
+  const upstreamMessage =
+    d?.message || d?.msg || d?.error || d?.data?.message || d?.data?.msg || "";
+  throw new Error(
+    `Failed to claim game. API Status: ${d.status}${upstreamMessage ? ` · ${upstreamMessage}` : ""}`,
+  );
 }
 
 async function doStopGame(session) {
@@ -827,6 +845,15 @@ app.get("/cloud/v1/getQueue", auth, async (req, res) => {
 
     if (pos === 0) {
       const serverData = await doClaimGame(session, session.queue_id);
+
+      if (!serverData) {
+        return res.json({
+          status: "queue",
+          queue_pos: 0,
+          claim_pending: true,
+        });
+      }
+
       applyServerData(session, serverData);
       session.state = "finished_queue";
       session.finished_queue_at = Date.now();
