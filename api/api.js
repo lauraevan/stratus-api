@@ -6,6 +6,7 @@ const { createServer } = require("http");
 const dns = require("dns");
 const path = require("path");
 const chalk = require("chalk");
+const { claimEligibleRewards } = require("./raccoon-rewards.js");
 
 if (!globalThis.crypto) globalThis.crypto = require("crypto").webcrypto;
 
@@ -67,6 +68,36 @@ async function raccoonFetch(pathAndQuery, opts = {}) {
     return fetchWithTimeout(`https://${RACCOON_HOST}${pathAndQuery}`, opts);
   }
 }
+
+async function runAccountRewards(account) {
+  try {
+    const summary = await claimEligibleRewards(account, {
+      raccoonFetch,
+      log: (message) => logSys(chalk.gray(message)),
+    });
+
+    if (!summary?.enabled) {
+      logSys(chalk.gray("rewards: disabled"));
+      return summary;
+    }
+
+    logSys(
+      chalk.gray(
+        `rewards: configured=${summary.configured} claimed=${summary.claimed.length} skipped=${summary.skipped.length} failed=${summary.failed.length}`,
+      ),
+    );
+
+    return summary;
+  } catch (error) {
+    logSys(
+      chalk.yellow(
+        `rewards: collector error — ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+    return null;
+  }
+}
+
 
 const sessions = new Map();
 const siteUsage = new Map();
@@ -854,6 +885,7 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
     push({ status: "requesting_game" });
 
     const init = await doInitGame(session);
+    void runAccountRewards({ sn: session.sn, token: session.token });
 
     if (!sessions.has(uuid)) return res.end();
 
