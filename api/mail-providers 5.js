@@ -2,6 +2,11 @@ const { randomUUID } = require("crypto");
 
 const MAIL_PROVIDERS = [
   {
+    name: "smails",
+    type: "smails",
+    baseUrl: "https://smails.dev/api",
+  },
+  {
     name: "Mail.tm",
     type: "mailtm",
     baseUrl: "https://api.mail.tm",
@@ -20,11 +25,6 @@ const MAIL_PROVIDERS = [
     name: "NonMail",
     type: "nonmail",
     baseUrl: "https://api.nonmail.com/v1",
-  },
-  {
-    name: "smails",
-    type: "smails",
-    baseUrl: "https://smails.dev/api",
   },
   {
     name: "DropMail",
