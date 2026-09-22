@@ -5,6 +5,8 @@ const { WebSocketServer, WebSocket } = require("ws");
 const { createServer } = require("http");
 const path = require("path");
 const chalk = require("chalk");
+const { createAccount: createMailAccount } = require("./mail-providers 5.js");
+const { claimEligibleRewards } = require("./raccoon-rewards.js");
 
 if (!globalThis.crypto) globalThis.crypto = require("crypto").webcrypto;
 
@@ -77,7 +79,7 @@ async function getVerificationCode(mailJwt, maxRetries = 30) {
   throw new Error("Timeout getting verification code");
 }
 
-async function createAccount() {
+async function createAccountLegacy() {
   const domainData = await (await fetch("https://api.mail.tm/domains")).json();
   if (!domainData["hydra:member"]?.length)
     throw new Error("No Mail.tm domains available");
@@ -155,6 +157,56 @@ async function createAccount() {
   }
 
   return { sn, token: userToken };
+}
+
+
+async function collectAccountRewards(account) {
+  try {
+    const summary = await claimEligibleRewards(account, {
+      raccoonFetch: (pathAndQuery, opts) =>
+        fetch(`https://www.raccoongame.com${pathAndQuery}`, opts),
+      log: (message) => logSys(chalk.gray(message)),
+    });
+
+    if (summary.configured > 0) {
+      logSys(
+        chalk.gray(
+          `rewards: configured=${summary.configured} claimed=${summary.claimed.length} skipped=${summary.skipped.length} failed=${summary.failed.length}`,
+        ),
+      );
+    }
+
+    return summary;
+  } catch (error) {
+    logSys(
+      chalk.yellow(
+        `rewards: collector error — ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ),
+    );
+    return null;
+  }
+}
+
+async function createAccount() {
+  let account;
+
+  try {
+    account = await createMailAccount();
+  } catch (error) {
+    logSys(
+      chalk.yellow(
+        `mail providers failed; trying legacy Mail.tm path — ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ),
+    );
+    account = await createAccountLegacy();
+  }
+
+  account.reward_summary = await collectAccountRewards(account);
+  return account;
 }
 
 function gameHeaders(token) {
