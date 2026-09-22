@@ -432,8 +432,82 @@
         function dcSend(buf) {
             if (_dc && _dc.readyState === "open") _dc.send(buf);
         }
+
+        /* Virtual touch controller from ARC. It is emitted as an additional
+           XInput pad, so a paired physical controller keeps working normally. */
+        let touchPad = null, touchPadAt = 0;
+        window.addEventListener("message", (e) => {
+            if (e.source !== parent) return;
+            const d = e.data;
+            if (!d || d.source !== "arc-touchpad") return;
+
+            if (d.kind === "mouse") {
+                if (!_dc) return;
+                const r = getVideoRect();
+                const dx = Math.max(-127, Math.min(127, Math.round(d.dx || 0)));
+                const dy = Math.max(-127, Math.min(127, Math.round(d.dy || 0)));
+                curX = Math.max(r.left, Math.min(r.left + r.width,  curX + dx));
+                curY = Math.max(r.top,  Math.min(r.top  + r.height, curY + dy));
+                if (typeof d.buttons === "number") mouseButtons = d.buttons;
+                sendMouse(dx, dy, d.scroll || 0);
+                return;
+            }
+
+            if (d.kind === "key") {
+                if (!_dc || !d.code) return;
+                sendKey(d.code | 0, !!d.down);
+                return;
+            }
+
+            if (!d.pad) return;
+            const p = d.pad;
+            touchPad = {
+                mask: (p.mask | 0) & 0xffff,
+                lt: Math.max(0, Math.min(255, p.lt | 0)),
+                rt: Math.max(0, Math.min(255, p.rt | 0)),
+                lx: Math.max(-32767, Math.min(32767, p.lx | 0)),
+                ly: Math.max(-32767, Math.min(32767, p.ly | 0)),
+                rx: Math.max(-32767, Math.min(32767, p.rx | 0)),
+                ry: Math.max(-32767, Math.min(32767, p.ry | 0))
+            };
+            touchPadAt = Date.now();
+        });
+
+        let touchCursorSeeded = false;
+        function seedTouchCursor() {
+            if (touchCursorSeeded) return;
+            const r = getVideoRect();
+            if (!r.width || !r.height) return;
+            curX = r.left + r.width / 2;
+            curY = r.top + r.height / 2;
+            touchCursorSeeded = true;
+        }
+
+        function sendTouchPad() {
+            if (!touchPad) return;
+            if (Date.now() - touchPadAt > 2000) {
+                const idle = touchPad.mask === 0 && !touchPad.lt && !touchPad.rt &&
+                    !touchPad.lx && !touchPad.ly && !touchPad.rx && !touchPad.ry;
+                if (idle) return;
+                touchPad = { mask:0, lt:0, rt:0, lx:0, ly:0, rx:0, ry:0 };
+            }
+
+            const t = touchPad;
+            const buf = new ArrayBuffer(17), v = new DataView(buf);
+            v.setUint8(0, 1); v.setUint8(1, 16); v.setUint8(2, 3); v.setUint8(3, 2);
+            v.setUint8(4, 0);
+            v.setUint16(5, t.mask); v.setUint8(7, t.lt); v.setUint8(8, t.rt);
+            v.setInt16(9, t.lx); v.setInt16(11, t.ly);
+            v.setInt16(13, t.rx); v.setInt16(15, t.ry);
+            dcSend(buf);
+        }
+
         function inputLoop() {
-            if (_dc && _dc.readyState === "open") sendGamepad();
+            if (_dc && _dc.readyState === "open") {
+                seedTouchCursor();
+                sendGamepad();
+                sendTouchPad();
+            }
             requestAnimationFrame(inputLoop);
         }
         requestAnimationFrame(inputLoop);
