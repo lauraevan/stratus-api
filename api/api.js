@@ -836,7 +836,10 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
   );
 
   try {
-    push({ status: "creating_account" });
+    // Send the session id immediately. Cold account creation can take a while,
+    // and clients must be able to continue by polling even if this NDJSON
+    // stream is interrupted by a proxy or platform timeout.
+    push({ status: "creating_account", uuid });
     const acc = await createAccount();
 
     releaseAccountSlot(apiKey);
@@ -898,6 +901,13 @@ app.get("/cloud/v1/getQueue", auth, async (req, res) => {
     return res.status(404).json({ error: "Session not found or expired." });
   if (session.api_key !== req.apiKey)
     return res.status(403).json({ error: "Forbidden." });
+
+  if (session.state === "creating") {
+    return res.json({
+      status: "creating_account",
+      uuid,
+    });
+  }
 
   if (session.state !== "queued" && session.state !== "finished_queue") {
     return res
