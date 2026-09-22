@@ -190,21 +190,7 @@ async function collectAccountRewards(account) {
 }
 
 async function createAccount() {
-  let account;
-
-  try {
-    account = await createMailAccount();
-  } catch (error) {
-    logSys(
-      chalk.yellow(
-        `mail providers failed; trying legacy Mail.tm path — ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      ),
-    );
-    account = await createAccountLegacy();
-  }
-
+  const account = await createMailAccount();
   account.reward_summary = await collectAccountRewards(account);
   return account;
 }
