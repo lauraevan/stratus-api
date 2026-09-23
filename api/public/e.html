@@ -142,6 +142,14 @@
         const ambientEl         = document.getElementById("ambient");
         const audioOverlay      = document.getElementById("audio-overlay");
         const endedOverlay      = document.getElementById("ended-overlay");
+        const adaptiveParams    = new URLSearchParams(location.hash.slice(1) || location.search.slice(1));
+        const requestedPerformanceTier = ["low", "balanced", "high"].includes(adaptiveParams.get("perf"))
+            ? adaptiveParams.get("perf")
+            : "balanced";
+        const requestedPlatform = adaptiveParams.get("platform") || "standard";
+        document.documentElement.dataset.performanceTier = requestedPerformanceTier;
+        document.documentElement.dataset.platform = requestedPlatform;
+
         const connectingOverlay = document.getElementById("connecting-overlay");
         const dots              = [document.getElementById("d1"), document.getElementById("d2"), document.getElementById("d3")];
 
@@ -168,16 +176,101 @@
         ambientEl.width  = 128;
         ambientEl.height = 72;
         let ambientInterval = null;
+        let frameQualityTimer = null;
+        let lastFrameQuality = null;
+        let poorFrameWindows = 0;
+        let goodFrameWindows = 0;
+        let runtimeLowPower = requestedPerformanceTier === "low";
+
+        function applyRuntimePerformance(lowPower, reason = "") {
+            runtimeLowPower = Boolean(lowPower);
+            document.documentElement.dataset.runtimePerformance = runtimeLowPower ? "low" : requestedPerformanceTier;
+            ambientEl.style.display = runtimeLowPower ? "none" : "";
+            if (runtimeLowPower) stopAmbient();
+            else startAmbient();
+
+            try {
+                parent.postMessage({
+                    type: "arc-player-performance",
+                    tier: runtimeLowPower ? "low" : requestedPerformanceTier,
+                    reason
+                }, location.origin);
+            } catch {}
+        }
+
         function startAmbient() {
+            if (runtimeLowPower) {
+                ambientEl.style.display = "none";
+                return;
+            }
+            if (ambientInterval) return;
+            ambientEl.style.display = "";
             ambientEl.classList.add("visible");
+            const intervalMs = requestedPerformanceTier === "high" ? 150 : 320;
             ambientInterval = setInterval(() => {
                 if (streamEl.readyState >= 2) ambientCtx.drawImage(streamEl, 0, 0, 128, 72);
-            }, 150);
+            }, intervalMs);
         }
+
         function stopAmbient() {
             clearInterval(ambientInterval);
             ambientInterval = null;
             ambientEl.classList.remove("visible");
+        }
+
+        function readFrameQuality() {
+            if (typeof streamEl.getVideoPlaybackQuality === "function") {
+                const quality = streamEl.getVideoPlaybackQuality();
+                return {
+                    total: Number(quality.totalVideoFrames || 0),
+                    dropped: Number(quality.droppedVideoFrames || 0)
+                };
+            }
+
+            const total = Number(streamEl.webkitDecodedFrameCount || 0);
+            const dropped = Number(streamEl.webkitDroppedFrameCount || 0);
+            return total ? { total, dropped } : null;
+        }
+
+        function startFrameQualityMonitor() {
+            clearInterval(frameQualityTimer);
+            lastFrameQuality = readFrameQuality();
+            if (!lastFrameQuality) return;
+
+            frameQualityTimer = setInterval(() => {
+                const current = readFrameQuality();
+                if (!current || !lastFrameQuality) {
+                    lastFrameQuality = current;
+                    return;
+                }
+
+                const totalDelta = current.total - lastFrameQuality.total;
+                const droppedDelta = current.dropped - lastFrameQuality.dropped;
+                lastFrameQuality = current;
+                if (totalDelta < 45) return;
+
+                const dropRatio = Math.max(0, droppedDelta) / Math.max(1, totalDelta);
+                if (dropRatio >= 0.08) {
+                    poorFrameWindows += 1;
+                    goodFrameWindows = 0;
+                } else if (dropRatio <= 0.015) {
+                    goodFrameWindows += 1;
+                    poorFrameWindows = 0;
+                } else {
+                    poorFrameWindows = 0;
+                    goodFrameWindows = 0;
+                }
+
+                if (!runtimeLowPower && poorFrameWindows >= 2) {
+                    applyRuntimePerformance(true, "dropped-frames");
+                    poorFrameWindows = 0;
+                } else if (runtimeLowPower
+                    && requestedPerformanceTier !== "low"
+                    && goodFrameWindows >= 4) {
+                    applyRuntimePerformance(false, "frames-recovered");
+                    goodFrameWindows = 0;
+                }
+            }, 5000);
         }
 
         let pc   = null;
@@ -251,6 +344,7 @@
         function onLive() {
             clearTimeout(signalingFailureTimer);
             hideConnecting();
+            startFrameQualityMonitor();
             streamEl.classList.add("visible");
             streamEl.play().catch(() => {});
             startAmbient();
@@ -263,6 +357,8 @@
         }
         function showEnded() {
             clearTimeout(signalingFailureTimer);
+            clearInterval(frameQualityTimer);
+            frameQualityTimer = null;
             hideConnecting();
             streamEl.classList.remove("visible");
             stopAmbient();
