@@ -675,7 +675,8 @@ setInterval(() => {
   const now = Date.now();
   for (const [uuid, session] of sessions) {
     if (session.state === "queued") {
-      const lastSeen = session.last_queue_poll_at ?? session.created_at;
+      const lastSeen =
+        session.last_queue_poll_at ?? session.queued_at ?? session.created_at;
       if (
         now - lastSeen > QUEUED_POLL_STALE_AFTER ||
         now - session.created_at > QUEUED_MAX_AGE
@@ -895,6 +896,7 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
     created_at: Date.now(),
     max_session_seconds: sessionLimit,
     last_queue_poll_at: null,
+    queued_at: null,
     last_ping_at: null,
     startgame_timeout: null,
     queue_abandon_timeout: null,
@@ -947,10 +949,11 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
     if (init.queued) {
       session.state = "queued";
       session.queue_id = init.queue_id;
+      session.queued_at = Date.now();
 
       session.queue_abandon_timeout = setTimeout(
         () => killSession(uuid, "queue_abandoned"),
-        60_000,
+        2 * 60_000,
       );
 
       push({ status: "queue", uuid, queue_pos: init.initial_pos });
@@ -1013,7 +1016,7 @@ app.get("/cloud/v1/getQueue", auth, async (req, res) => {
   clearTimeout(session.queue_abandon_timeout);
   session.queue_abandon_timeout = setTimeout(
     () => killSession(uuid, "queue_abandoned"),
-    60_000,
+    2 * 60_000,
   );
 
   if (session.state === "finished_queue") {
