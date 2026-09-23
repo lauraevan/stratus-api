@@ -183,6 +183,7 @@
         let pc   = null;
         let _dc  = null;
         let sigWs = null;
+        let signalingFailureTimer = null;
         function sigSend(obj) {
             if (sigWs && sigWs.readyState === WebSocket.OPEN) sigWs.send(JSON.stringify(obj));
         }
@@ -226,10 +227,29 @@
                         break;
                 }
             };
-            sigWs.onclose = () => showEnded();
-            sigWs.onerror = () => showEnded();
+            const peerStillAlive = () => {
+                const ice = pc?.iceConnectionState;
+                const connection = pc?.connectionState;
+                return connection === "connected"
+                    || ice === "connected"
+                    || ice === "completed"
+                    || _dc?.readyState === "open"
+                    || streamEl.classList.contains("visible");
+            };
+
+            const handleSignalingDrop = () => {
+                clearTimeout(signalingFailureTimer);
+                if (peerStillAlive()) return;
+                signalingFailureTimer = setTimeout(() => {
+                    if (!peerStillAlive()) showEnded();
+                }, 8_000);
+            };
+
+            sigWs.onclose = handleSignalingDrop;
+            sigWs.onerror = handleSignalingDrop;
         }
         function onLive() {
+            clearTimeout(signalingFailureTimer);
             hideConnecting();
             streamEl.classList.add("visible");
             streamEl.play().catch(() => {});
@@ -242,6 +262,7 @@
             }, { once: true });
         }
         function showEnded() {
+            clearTimeout(signalingFailureTimer);
             hideConnecting();
             streamEl.classList.remove("visible");
             stopAmbient();
