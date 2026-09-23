@@ -138,6 +138,109 @@ const siteUsage = new Map();
 const ipLimits = new Map();
 const embedIpLimits = new Map();
 const accountCreating = new Map();
+const queueTelemetry = new Map();
+
+const QUEUE_ESTIMATE_TTL_MS = 10 * 60_000;
+const DEFAULT_QUEUE_SECONDS_PER_POSITION = 20;
+
+function recordQueueObservation(session, position) {
+  const numericPosition = Number(position);
+  if (!session || !Number.isFinite(numericPosition) || numericPosition < 0) return;
+
+  const now = Date.now();
+  const previousPosition = Number(session.last_queue_position);
+  const previousAt = Number(session.last_queue_position_at);
+  const current = queueTelemetry.get(session.game_key) || {};
+
+  let secondsPerPosition = Number(current.seconds_per_position);
+  if (
+    Number.isFinite(previousPosition) &&
+    Number.isFinite(previousAt) &&
+    previousPosition > numericPosition &&
+    now > previousAt
+  ) {
+    const sample = Math.min(
+      120,
+      Math.max(2, (now - previousAt) / 1000 / (previousPosition - numericPosition)),
+    );
+    secondsPerPosition = Number.isFinite(secondsPerPosition)
+      ? secondsPerPosition * 0.65 + sample * 0.35
+      : sample;
+  }
+
+  queueTelemetry.set(session.game_key, {
+    position: numericPosition,
+    observed_at: now,
+    seconds_per_position: Number.isFinite(secondsPerPosition)
+      ? secondsPerPosition
+      : null,
+  });
+
+  session.last_queue_position = numericPosition;
+  session.last_queue_position_at = now;
+}
+
+function queueEstimateFor(gameKey) {
+  const telemetry = queueTelemetry.get(gameKey);
+  if (!telemetry) {
+    return {
+      game_key: gameKey,
+      status: "unknown",
+      queue_pos: null,
+      observed_at: null,
+      observed_age_seconds: null,
+      estimated_wait_seconds: null,
+      confidence: "none",
+    };
+  }
+
+  const ageMs = Date.now() - telemetry.observed_at;
+  if (ageMs > QUEUE_ESTIMATE_TTL_MS) {
+    queueTelemetry.delete(gameKey);
+    return {
+      game_key: gameKey,
+      status: "unknown",
+      queue_pos: null,
+      observed_at: null,
+      observed_age_seconds: null,
+      estimated_wait_seconds: null,
+      confidence: "none",
+    };
+  }
+
+  const position = Math.max(0, Number(telemetry.position) || 0);
+  if (position === 0) {
+    return {
+      game_key: gameKey,
+      status: "ready",
+      queue_pos: 0,
+      observed_at: telemetry.observed_at,
+      observed_age_seconds: Math.floor(ageMs / 1000),
+      estimated_wait_seconds: { low: 0, high: 30 },
+      confidence: "high",
+    };
+  }
+
+  const learnedPace = Number(telemetry.seconds_per_position);
+  const secondsPerPosition = Number.isFinite(learnedPace)
+    ? learnedPace
+    : DEFAULT_QUEUE_SECONDS_PER_POSITION;
+  const center = Math.max(20, position * secondsPerPosition);
+  const round15 = (seconds) => Math.max(15, Math.round(seconds / 15) * 15);
+
+  return {
+    game_key: gameKey,
+    status: "queued",
+    queue_pos: position,
+    observed_at: telemetry.observed_at,
+    observed_age_seconds: Math.floor(ageMs / 1000),
+    estimated_wait_seconds: {
+      low: round15(center * 0.6),
+      high: round15(center * 1.5),
+    },
+    confidence: Number.isFinite(learnedPace) ? "medium" : "low",
+  };
+}
 
 const MAX_SESSION_SECONDS = 19 * 60;
 
@@ -849,6 +952,16 @@ app.get("/cloud/v1/embed-data", (req, res) => {
   });
 });
 
+app.get("/cloud/v1/queueEstimate", auth, (req, res) => {
+  const gameKey = String(req.query.game_key || "").trim();
+  if (!gameKey || gameKey.length > 256) {
+    return res.status(400).json({ error: "Invalid game_key." });
+  }
+
+  res.setHeader("Cache-Control", "no-store");
+  return res.json(queueEstimateFor(gameKey));
+});
+
 app.post("/cloud/v1/createSession", auth, async (req, res) => {
   const { game_key } = req.body;
   if (!game_key || typeof game_key !== "string" || game_key.length > 256) {
@@ -897,6 +1010,8 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
     max_session_seconds: sessionLimit,
     last_queue_poll_at: null,
     queued_at: null,
+    last_queue_position: null,
+    last_queue_position_at: null,
     last_ping_at: null,
     startgame_timeout: null,
     queue_abandon_timeout: null,
@@ -950,6 +1065,7 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
       session.state = "queued";
       session.queue_id = init.queue_id;
       session.queued_at = Date.now();
+      recordQueueObservation(session, init.initial_pos);
 
       session.queue_abandon_timeout = setTimeout(
         () => killSession(uuid, "queue_abandoned"),
@@ -958,6 +1074,7 @@ app.post("/cloud/v1/createSession", auth, async (req, res) => {
 
       push({ status: "queue", uuid, queue_pos: init.initial_pos });
     } else {
+      recordQueueObservation(session, 0);
       applyServerData(session, init.server_data);
       session.state = "finished_queue";
       session.finished_queue_at = Date.now();
@@ -1029,6 +1146,7 @@ app.get("/cloud/v1/getQueue", auth, async (req, res) => {
 
   try {
     const pos = await doPollQueue(session, session.queue_id);
+    recordQueueObservation(session, pos);
 
     if (pos === 0) {
       const serverData = await doClaimGame(session, session.queue_id);
