@@ -649,7 +649,7 @@ function resetPingTimeout(uuid) {
   clearTimeout(session.ping_timeout);
   session.ping_timeout = setTimeout(
     () => killSession(uuid, "ping_timeout"),
-    30_000,
+    2 * 60_000,
   );
 }
 
