@@ -646,11 +646,22 @@ function killSession(uuid, reason = "unknown") {
 function resetPingTimeout(uuid) {
   const session = sessions.get(uuid);
   if (!session) return;
+
   clearTimeout(session.ping_timeout);
-  session.ping_timeout = setTimeout(
-    () => killSession(uuid, "ping_timeout"),
-    2 * 60_000,
-  );
+  session.ping_timeout = setTimeout(() => {
+    const current = sessions.get(uuid);
+    if (!current || current.state !== "active") return;
+
+    // Treat a healthy signaling socket as proof that the player is still alive.
+    // ARC's HTTP heartbeat crosses a serverless proxy and can occasionally be
+    // delayed or dropped even while the WebRTC session itself is healthy.
+    if (current.clientWs?.readyState === WebSocket.OPEN) {
+      resetPingTimeout(uuid);
+      return;
+    }
+
+    killSession(uuid, "ping_timeout");
+  }, 2 * 60_000);
 }
 
 const REAPER_DEADLINES = {
@@ -1244,8 +1255,32 @@ httpServer.on("upgrade", (req, socket, head) => {
 
   wss.handleUpgrade(req, socket, head, (ws) => {
     session.clientWs = ws;
+    ws.isAlive = true;
+    resetPingTimeout(uuid);
+
+    // Use WebSocket protocol ping/pong as a transport-level heartbeat. This
+    // avoids killing a live game just because an HTTP heartbeat was delayed
+    // by ARC's Vercel proxy, while still detecting genuinely dead clients.
+    const transportHeartbeat = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (ws.isAlive === false) {
+        try { ws.terminate(); } catch {}
+        return;
+      }
+      ws.isAlive = false;
+      try { ws.ping(); } catch {}
+    }, 25_000);
+    transportHeartbeat.unref?.();
+
+    ws.on("pong", () => {
+      ws.isAlive = true;
+      resetPingTimeout(uuid);
+    });
 
     ws.on("message", (raw) => {
+      ws.isAlive = true;
+      resetPingTimeout(uuid);
+
       let msg;
       try {
         msg = JSON.parse(raw.toString());
@@ -1278,7 +1313,8 @@ httpServer.on("upgrade", (req, socket, head) => {
     });
 
     ws.on("close", () => {
-      session.clientWs = undefined;
+      clearInterval(transportHeartbeat);
+      if (session.clientWs === ws) session.clientWs = undefined;
     });
     ws.on("error", () => {});
   });
