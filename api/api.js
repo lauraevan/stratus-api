@@ -297,7 +297,7 @@ async function getVerificationCode(mailJwt, maxRetries = 30) {
   throw new Error("Timeout getting verification code");
 }
 
-const POOL_TARGET = 5;
+const POOL_TARGET = 7;
 const pool = [];
 let poolFilling = false;
 
