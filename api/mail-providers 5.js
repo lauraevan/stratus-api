@@ -2,12 +2,6 @@ const { randomUUID } = require("crypto");
 
 const MAIL_PROVIDERS = [
   {
-    name: "ArcMail",
-    type: "arcmail",
-    baseUrl: String(process.env.ARCMAIL_URL || "").trim().replace(/\/+$/, ""),
-    requiresEnv: "ARCMAIL_URL",
-  },
-  {
     name: "smails",
     type: "smails",
     baseUrl: "https://smails.dev/api",
@@ -223,33 +217,6 @@ function extractVerificationCode(value) {
   if (groupedDigits) return `${groupedDigits[1]}${groupedDigits[2]}`;
 
   return null;
-}
-
-function arcMailHeaders() {
-  const secret = String(process.env.ARCMAIL_SECRET || "").trim();
-
-  if (!secret) {
-    throw new Error("ArcMail: ARCMAIL_SECRET is missing");
-  }
-
-  return {
-    Authorization: `Bearer ${secret}`,
-    Accept: "application/json",
-  };
-}
-
-async function getArcMailMessages(provider, mailbox) {
-  const inbox = await mailRequest(
-    provider,
-    `/api/v1/inbox/${encodeURIComponent(mailbox.token)}`,
-    {
-      method: "GET",
-      headers: arcMailHeaders(),
-    },
-    "inbox polling",
-  );
-
-  return Array.isArray(inbox.mail) ? inbox.mail : [];
 }
 
 function tempMailIngHeaders() {
@@ -632,8 +599,6 @@ async function getMailsacMessages(provider, mailbox) {
 
 function getMessagesForProvider(provider, mailbox) {
   switch (provider.type) {
-    case "arcmail":
-      return getArcMailMessages(provider, mailbox);
     case "tempmailing":
       return getTempMailIngMessages(provider, mailbox);
     case "nonmail":
@@ -762,28 +727,6 @@ async function createMailTmMailbox(provider) {
     provider,
     address,
     token: tokenData.token,
-  };
-}
-
-async function createArcMailMailbox(provider) {
-  const session = await mailRequest(
-    provider,
-    "/api/v1/session",
-    {
-      method: "GET",
-      headers: arcMailHeaders(),
-    },
-    "mailbox creation",
-  );
-
-  if (!session.address || !session.token) {
-    throw new Error(`${provider.name}: mailbox creation was rejected`);
-  }
-
-  return {
-    provider,
-    address: session.address,
-    token: session.token,
   };
 }
 
@@ -953,8 +896,6 @@ async function createMailsacMailbox(provider) {
 
 async function createMailbox(provider) {
   switch (provider.type) {
-    case "arcmail":
-      return createArcMailMailbox(provider);
     case "tempmailing":
       return createTempMailIngMailbox(provider);
     case "nonmail":
